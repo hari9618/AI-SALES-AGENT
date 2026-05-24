@@ -1,0 +1,138 @@
+{
+  "name": "Sales AI Lead Automation",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "sales-lead",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://fastapi:8000/api/v1/leads/analyse",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "user_input", "value": "={{ $json.body.message }}" },
+            { "name": "session_id", "value": "={{ $json.body.session_id }}" }
+          ]
+        },
+        "options": { "timeout": 60000 }
+      },
+      "id": "fastapi-call",
+      "name": "Call FastAPI Lead Analysis",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "leftValue": "", "caseSensitive": true },
+          "conditions": [
+            {
+              "id": "priority-check",
+              "leftValue": "={{ $json.result.priority }}",
+              "rightValue": "high",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ],
+          "combinator": "or"
+        }
+      },
+      "id": "priority-router",
+      "name": "Priority Router",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://hooks.slack.com/services/YOUR_SLACK_WEBHOOK",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "text",
+              "value": "={{ '🚨 *HIGH PRIORITY LEAD*\\nCategory: ' + $json.result.category + '\\nPriority: ' + $json.result.priority + '\\nSentiment: ' + $json.result.sentiment + '\\nResponse preview: ' + $json.result.ai_response.substring(0, 200) }}"
+            }
+          ]
+        }
+      },
+      "id": "slack-notify",
+      "name": "Slack Alert (High Priority)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [900, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.sendgrid.com/v3/mail/send",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "Bearer YOUR_SENDGRID_KEY" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "jsonBody": "={{ JSON.stringify({ \"personalizations\": [{ \"to\": [{ \"email\": \"sales@company.com\" }] }], \"from\": { \"email\": \"noreply@company.com\" }, \"subject\": \"New Lead: \" + $json.result.category, \"content\": [{ \"type\": \"text/plain\", \"value\": $json.result.ai_response }] }) }}"
+      },
+      "id": "email-notify",
+      "name": "Email to Sales Team",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [900, 400]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ \"status\": \"processed\", \"session_id\": $node[\"fastapi-call\"].json.session_id, \"priority\": $node[\"fastapi-call\"].json.result.priority, \"notified\": true }) }}"
+      },
+      "id": "respond",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1120, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [[ { "node": "Call FastAPI Lead Analysis", "type": "main", "index": 0 } ]]
+    },
+    "Call FastAPI Lead Analysis": {
+      "main": [[ { "node": "Priority Router", "type": "main", "index": 0 } ]]
+    },
+    "Priority Router": {
+      "main": [
+        [ { "node": "Slack Alert (High Priority)", "type": "main", "index": 0 } ],
+        [ { "node": "Email to Sales Team",         "type": "main", "index": 0 } ]
+      ]
+    },
+    "Slack Alert (High Priority)": {
+      "main": [[ { "node": "Respond to Webhook", "type": "main", "index": 0 } ]]
+    },
+    "Email to Sales Team": {
+      "main": [[ { "node": "Respond to Webhook", "type": "main", "index": 0 } ]]
+    }
+  },
+  "active": true,
+  "settings": { "executionOrder": "v1" },
+  "tags": ["sales", "ai", "automation"]
+}
